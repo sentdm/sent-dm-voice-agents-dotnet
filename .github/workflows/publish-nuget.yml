@@ -1,5 +1,6 @@
 # Runs when release-please publishes a release, and by hand to publish again if a run failed. By hand with
-# `dry_run`, it only exchanges the token for a key, which checks the nuget.org policy without publishing.
+# `dry_run`, it only exchanges the token for a key, which checks the nuget.org policy without publishing. A hand
+# publish runs on the release tag, never on a branch: `gh workflow run publish-nuget.yml --ref v<version>`.
 #
 # nuget.org is pushed by trusted publishing: the job's OIDC token is exchanged for a one-hour API key by
 # NuGet/login, against a Trusted Publishing policy on nuget.org created by the `sent` profile with the `sentdm`
@@ -17,7 +18,8 @@ on:
     types: [published]
 
 concurrency:
-  group: publish-nuget
+  # A dry run never queues behind, or displaces, a real publish.
+  group: publish-nuget${{ inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -35,19 +37,28 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - name: The version to publish
-        # 0.0.0 is the template's placeholder: the repository has no release yet, so there is nothing to publish.
+        # 0.0.0 is the template's placeholder: the repository has no release yet. A hand run publishes the
+        # release tag whose version the csproj carries, so main's later commits never ship under an old number.
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           version="$(sed -n 's/.*<VersionPrefix>\(.*\)<\/VersionPrefix>.*/\1/p' src/SentDm.Voice.Agents/SentDm.Voice.Agents.csproj)"
           echo "version=$version"
-          if [ "$version" = "0.0.0" ] && [ "${{ inputs.dry_run }}" != "true" ]; then
+          [ "$DRY_RUN" = "true" ] && exit 0
+          if [ "$version" = "0.0.0" ]; then
             echo "no release yet: the csproj still carries 0.0.0" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && { [ "$GITHUB_REF_TYPE" != "tag" ] || [ "$GITHUB_REF_NAME" != "v$version" ]; }; then
+            echo "a hand run publishes the release tag: gh workflow run publish-nuget.yml --ref v$version" >&2
             exit 1
           fi
       - name: Build and pack
         run: dotnet pack src/SentDm.Voice.Agents --configuration Release --output artifacts
       - name: Exchange the job's OIDC token for a temporary nuget.org API key
         id: login
-        uses: NuGet/login@v1
+        # Pinned to a commit: this action receives the job's OIDC token and hands back the key that pushes.
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         with:
           # The nuget.org profile that created the policy (not the organisation that owns the packages, and not
           # an email address); NUGET_USER overrides it for a policy created by someone else.
