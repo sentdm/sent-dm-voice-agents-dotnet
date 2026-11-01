@@ -63,6 +63,9 @@ public sealed class Session
     /// <summary>session.end, once it arrived.</summary>
     public SessionEnd? End { get; private set; }
 
+    /// <summary>The connection was lost and the session could not be resumed: Sent ends the call without a session.end.</summary>
+    public bool Lost { get; private set; }
+
     /// <summary>What session.start said about the call.</summary>
     public SessionStart Start { get; }
 
@@ -103,7 +106,8 @@ public sealed class Session
 
     // ----- what the agent does on the call -----
 
-    public bool Ended => End is not null;
+    /// <summary>Whether the call has left the agent: session.end arrived, or the session was lost.</summary>
+    public bool Ended => End is not null || Lost;
 
     /// <summary>Whether the session survives a lost connection: it has a resume token.</summary>
     public bool Resumable => Token is not null;
@@ -144,8 +148,14 @@ public sealed class Session
     /// </summary>
     public void SendAudio(ReadOnlySpan<byte> samples)
     {
+        if (Ended)
+            throw new SessionEndedException(Id);
         if (Stream is not int stream)
             throw new InvalidOperationException($"session {Id} is a text session");
+        // The stream number belongs to the old connection; on the new one it may be another caller's until
+        // session.resumed assigns this session's. Audio is not counted, so there is nothing to send again.
+        if (Resuming)
+            return;
         Connection.SendBytes(Audio.Frame(stream, samples));
     }
 
@@ -213,14 +223,24 @@ public sealed class Session
 
     // ----- what the agent's connection does with the session -----
 
-    /// <summary>Sends a frame for the session on its connection, keeping it if it counts.</summary>
+    /// <summary>
+    /// Sends a frame for the session on its connection, keeping it if it counts. A frame that breaks the protocol
+    /// is refused before it counts. While a resume is unanswered the frame is kept and not sent: the replay after
+    /// session.resumed sends it, once, on the connection the session is on. Keeping and sending happen under one
+    /// lock, so the wire order is the kept order.
+    /// </summary>
     internal void Send(Frame frame)
     {
         if (Ended)
             throw new SessionEndedException(Id);
         var json = Protocol.EncodeToString(frame);
-        Keep(frame);
-        Connection.SendText(frame.Type, json);
+        lock (_gate)
+        {
+            Keep(frame);
+            if (Resuming)
+                return;
+            Connection.SendText(frame.Type, json);
+        }
     }
 
     private void Keep(Frame frame)
@@ -259,21 +279,24 @@ public sealed class Session
     }
 
     /// <summary>
-    /// Takes the answer to a session.resume. Returns the frames to send again, or a hangup when Sent needs one
-    /// the session no longer keeps.
+    /// Takes the answer to a session.resume and sends again, on the session's connection, the frames Sent did not
+    /// read, or a hangup when Sent needs one the session no longer keeps. Returns how many it sent. The replay
+    /// and the end of the resume happen under the session's lock, so nothing a handler sends can slip between.
     /// </summary>
-    internal IReadOnlyList<Frame> Resumed(SessionResumed frame)
+    internal int Resumed(SessionResumed frame)
     {
-        Resuming = false;
-        Token = frame.Resume?.Token;
-        if (frame.Audio is not null)
-            Stream = (int)frame.Audio.Stream;
-        // Without a next token the session ended while it was detached; its replay ends with session.end.
-        if (frame.Resume is null)
-            return Array.Empty<Frame>();
-        List<Frame> again;
         lock (_gate)
         {
+            Token = frame.Resume?.Token;
+            if (frame.Audio is not null)
+                Stream = (int)frame.Audio.Stream;
+            // Without a next token the session ended while it was detached; its replay ends with session.end.
+            if (frame.Resume is null)
+            {
+                Resuming = false;
+                return 0;
+            }
+            List<Frame> again;
             if (frame.Received < _before)
                 again = new List<Frame>
                 {
@@ -285,16 +308,21 @@ public sealed class Session
                     },
                 };
             else
-                again = _kept.GetRange(
-                    (int)(frame.Received - _before),
-                    _kept.Count - (int)(frame.Received - _before)
-                );
+            {
+                // A received past what was sent is Sent's mistake; there is nothing to send again for it.
+                var read = (int)Math.Min(frame.Received - _before, _kept.Count);
+                again = _kept.GetRange(read, _kept.Count - read);
+            }
             _before = frame.Received;
             _kept = new List<Frame>();
+            foreach (var frameAgain in again)
+            {
+                Keep(frameAgain);
+                Connection.SendText(frameAgain.Type, Protocol.EncodeToString(frameAgain));
+            }
+            Resuming = false;
+            return again.Count;
         }
-        foreach (var frameAgain in again)
-            Keep(frameAgain);
-        return again;
     }
 
     internal void AnswerTool(ToolResult result)
@@ -310,10 +338,30 @@ public sealed class Session
 
     internal void Finish(SessionEnd end)
     {
+        lock (_gate)
+            End = end;
+        FailPending();
+    }
+
+    /// <summary>
+    /// The session is lost: no tool.result or session.end will come, so every waiting tool call fails, and
+    /// anything sent from now on is refused.
+    /// </summary>
+    internal void Abandon()
+    {
+        lock (_gate)
+        {
+            Lost = true;
+            Resuming = false;
+        }
+        FailPending();
+    }
+
+    private void FailPending()
+    {
         List<TaskCompletionSource<ToolResult>> pending;
         lock (_gate)
         {
-            End = end;
             pending = new List<TaskCompletionSource<ToolResult>>(_pending.Values);
             _pending.Clear();
         }

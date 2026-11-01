@@ -482,8 +482,8 @@ public static class Protocol
         ["session.resume"] = new HashSet<string> { "text", "audio" },
     };
 
-    /// <summary>Session frames that do not count towards <c>received</c>; every other frame with a session_id counts, also one of an unknown type.</summary>
-    public static readonly IReadOnlySet<string> Uncounted = new HashSet<string> { "session.start", "session.resumed", "session.resume", "audio" };
+    /// <summary>Frames that do not count towards <c>received</c>, whatever they carry; every other frame with a session_id counts, also one of an unknown type.</summary>
+    public static readonly IReadOnlySet<string> Uncounted = new HashSet<string> { "error", "session.start", "session.resumed", "session.resume", "audio" };
 
     /// <summary>The values Sent lists today; it may add more, so a runtime treats others as it would the fallback.</summary>
     public static readonly IReadOnlyList<string> PartyKinds = new[] { "user", "number", "conference", "agent", "anonymous" };
@@ -654,9 +654,8 @@ public static class Protocol
             return l;
         if (value.TryGetValue<int>(out var i))
             return i;
-        // A JSON number such as 1.0 or 1e3 is an integer when it has no fraction.
-        if (value.TryGetValue<double>(out var d) && !double.IsNaN(d) && Math.Floor(d) == d && Math.Abs(d) < 9007199254740992d)
-            return (long)d;
+        // A number written with a fraction or an exponent, such as 1.0 or 1e3, is not an integer here, as it is
+        // not for the Python SDK, and as the records' long properties would refuse it.
         return null;
     }
 
@@ -682,7 +681,7 @@ public static class Protocol
         if (!((d) as JsonObject)!.ContainsKey("kind")) throw new FrameException(path + @".kind is required");
         if (((d) as JsonObject)!.ContainsKey("kind"))
         {
-            if (!(StringOf(((d) as JsonObject)!["kind"]) is string s1 && (s1 is ("user" or "number" or "conference" or "agent" or "anonymous") || Regex.IsMatch(s1, @"^[a-z][a-z0-9_]*$")))) throw new FrameException(path + ".kind" + @" is not an allowed value");
+            if (!(StringOf(((d) as JsonObject)!["kind"]) is string s1 && (s1 is ("user" or "number" or "conference" or "agent" or "anonymous") || Regex.IsMatch(s1, @"^[a-z][a-z0-9_]*\z")))) throw new FrameException(path + ".kind" + @" is not an allowed value");
         }
         if (((d) as JsonObject)!.ContainsKey("value"))
         {
@@ -703,7 +702,7 @@ public static class Protocol
             if (((d) as JsonObject)!.ContainsKey("value"))
             {
                 if (StringOf(((d) as JsonObject)!["value"]) is not string) throw new FrameException(path + ".value" + @" must be a string");
-                if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["value"])!, @"^\+[1-9][0-9]{6,14}$")) throw new FrameException(path + ".value" + @" does not match ^\+[1-9][0-9]{6,14}$");
+                if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["value"])!, @"^\+[1-9][0-9]{6,14}\z")) throw new FrameException(path + ".value" + @" does not match ^\+[1-9][0-9]{6,14}$");
             }
         }
     }
@@ -716,7 +715,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("code"))
         {
             if (StringOf(((d) as JsonObject)!["code"]) is not string) throw new FrameException(path + ".code" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["code"])!, @"^[a-z][a-z0-9_]*$")) throw new FrameException(path + ".code" + @" does not match ^[a-z][a-z0-9_]*$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["code"])!, @"^[a-z][a-z0-9_]*\z")) throw new FrameException(path + ".code" + @" does not match ^[a-z][a-z0-9_]*$");
         }
         if (((d) as JsonObject)!.ContainsKey("message"))
         {
@@ -732,7 +731,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("token"))
         {
             if (StringOf(((d) as JsonObject)!["token"]) is not string) throw new FrameException(path + ".token" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["token"])!, @"^vsr_[A-Za-z0-9_-]+$")) throw new FrameException(path + ".token" + @" does not match ^vsr_[A-Za-z0-9_-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["token"])!, @"^vsr_[A-Za-z0-9_-]+\z")) throw new FrameException(path + ".token" + @" does not match ^vsr_[A-Za-z0-9_-]+$");
             if (StringOf(((d) as JsonObject)!["token"])!.Length < 26) throw new FrameException(path + ".token" + @" is shorter than 26");
             if (StringOf(((d) as JsonObject)!["token"])!.Length > 512) throw new FrameException(path + ".token" + @" is longer than 512");
         }
@@ -752,7 +751,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("protocol_version"))
         {
             if (StringOf(((d) as JsonObject)!["protocol_version"]) is not string) throw new FrameException(path + ".protocol_version" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["protocol_version"])!, @"^[0-9]+\.[0-9]+\.[0-9]+$")) throw new FrameException(path + ".protocol_version" + @" does not match ^[0-9]+\.[0-9]+\.[0-9]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["protocol_version"])!, @"^[0-9]+\.[0-9]+\.[0-9]+\z")) throw new FrameException(path + ".protocol_version" + @" does not match ^[0-9]+\.[0-9]+\.[0-9]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("heartbeat_interval_ms"))
         {
@@ -793,7 +792,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("frame_type"))
         {
@@ -815,17 +814,17 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("call_id"))
         {
             if (StringOf(((d) as JsonObject)!["call_id"]) is not string) throw new FrameException(path + ".call_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["call_id"])!, @"^call_[A-Za-z0-9-]+$")) throw new FrameException(path + ".call_id" + @" does not match ^call_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["call_id"])!, @"^call_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".call_id" + @" does not match ^call_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("agent_id"))
         {
             if (StringOf(((d) as JsonObject)!["agent_id"]) is not string) throw new FrameException(path + ".agent_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["agent_id"])!, @"^agent_[A-Za-z0-9-]+$")) throw new FrameException(path + ".agent_id" + @" does not match ^agent_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["agent_id"])!, @"^agent_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".agent_id" + @" does not match ^agent_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("direction"))
         {
@@ -910,7 +909,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("text"))
         {
@@ -933,7 +932,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("call_ref"))
         {
@@ -965,11 +964,11 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("reason"))
         {
-            if (!(StringOf(((d) as JsonObject)!["reason"]) is string s2 && (s2 is ("caller_hung_up" or "agent_hung_up" or "transferred" or "max_duration" or "agent_unreachable" or "balance_exhausted" or "voice_disabled" or "failed") || Regex.IsMatch(s2, @"^[a-z][a-z0-9_]*$")))) throw new FrameException(path + ".reason" + @" is not an allowed value");
+            if (!(StringOf(((d) as JsonObject)!["reason"]) is string s2 && (s2 is ("caller_hung_up" or "agent_hung_up" or "transferred" or "max_duration" or "agent_unreachable" or "balance_exhausted" or "voice_disabled" or "failed") || Regex.IsMatch(s2, @"^[a-z][a-z0-9_]*\z")))) throw new FrameException(path + ".reason" + @" is not an allowed value");
         }
         if (((d) as JsonObject)!.ContainsKey("duration_ms"))
         {
@@ -986,7 +985,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("received"))
         {
@@ -1030,7 +1029,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("text"))
         {
@@ -1057,7 +1056,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("call_ref"))
         {
@@ -1068,7 +1067,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("name"))
         {
             if (StringOf(((d) as JsonObject)!["name"]) is not string) throw new FrameException(path + ".name" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["name"])!, @"^[a-z][a-z0-9_]*$")) throw new FrameException(path + ".name" + @" does not match ^[a-z][a-z0-9_]*$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["name"])!, @"^[a-z][a-z0-9_]*\z")) throw new FrameException(path + ".name" + @" does not match ^[a-z][a-z0-9_]*$");
         }
         if (((d) as JsonObject)!.ContainsKey("arguments"))
         {
@@ -1112,7 +1111,7 @@ public static class Protocol
                 if (((((d) as JsonObject)!["arguments"]) as JsonObject)!.ContainsKey("digits"))
                 {
                     if (StringOf(((((d) as JsonObject)!["arguments"]) as JsonObject)!["digits"]) is not string) throw new FrameException(path + ".arguments" + ".digits" + @" must be a string");
-                    if (!Regex.IsMatch(StringOf(((((d) as JsonObject)!["arguments"]) as JsonObject)!["digits"])!, @"^[0-9*#A-Dw]+$")) throw new FrameException(path + ".arguments" + ".digits" + @" does not match ^[0-9*#A-Dw]+$");
+                    if (!Regex.IsMatch(StringOf(((((d) as JsonObject)!["arguments"]) as JsonObject)!["digits"])!, @"^[0-9*#A-Dw]+\z")) throw new FrameException(path + ".arguments" + ".digits" + @" does not match ^[0-9*#A-Dw]+$");
                 }
             }
         }
@@ -1147,7 +1146,7 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
     }
 
@@ -1160,12 +1159,12 @@ public static class Protocol
         if (((d) as JsonObject)!.ContainsKey("session_id"))
         {
             if (StringOf(((d) as JsonObject)!["session_id"]) is not string) throw new FrameException(path + ".session_id" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+$")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["session_id"])!, @"^vs_[A-Za-z0-9-]+\z")) throw new FrameException(path + ".session_id" + @" does not match ^vs_[A-Za-z0-9-]+$");
         }
         if (((d) as JsonObject)!.ContainsKey("token"))
         {
             if (StringOf(((d) as JsonObject)!["token"]) is not string) throw new FrameException(path + ".token" + @" must be a string");
-            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["token"])!, @"^vsr_[A-Za-z0-9_-]+$")) throw new FrameException(path + ".token" + @" does not match ^vsr_[A-Za-z0-9_-]+$");
+            if (!Regex.IsMatch(StringOf(((d) as JsonObject)!["token"])!, @"^vsr_[A-Za-z0-9_-]+\z")) throw new FrameException(path + ".token" + @" does not match ^vsr_[A-Za-z0-9_-]+$");
             if (StringOf(((d) as JsonObject)!["token"])!.Length < 26) throw new FrameException(path + ".token" + @" is shorter than 26");
             if (StringOf(((d) as JsonObject)!["token"])!.Length > 512) throw new FrameException(path + ".token" + @" is longer than 512");
         }
