@@ -21,7 +21,8 @@ The Sent Voice Agents SDK for .NET. Rendered by `sent-dm-sdk-pipeline` (`voice-a
 - Never log a resume token or an API key.
 - `dotnet csharpier check .` passes on every PR; `Frames.cs` is excluded because the emitter shapes it.
 - Branches named `release-please--branches--main` belong to release-please. Don't push to them or merge into
-  them. Merging the release PR tags the release and publishes to nuget.org.
+  them. Merging the release PR tags the release and publishes to nuget.org, by trusted publishing: the
+  policy on nuget.org names this repository and `publish-nuget.yml`, and no key is stored.
 
 ## Commits and pull requests
 
