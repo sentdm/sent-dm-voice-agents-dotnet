@@ -4,7 +4,7 @@
     <RootNamespace>SentDm.Voice.Agents</RootNamespace>
     <PackageId>SentDm.Voice.Agents</PackageId>
     <!-- release-please moves this line; the lane stamps the repository's current version at render time. -->
-    <VersionPrefix>0.0.0</VersionPrefix>
+    <VersionPrefix>0.1.0</VersionPrefix>
     <Description>Sent Voice Agents for .NET: an AI agent that takes and places phone calls through Sent.</Description>
     <PackageTags>sent;voice;agents;calls;websocket</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -13,7 +13,7 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="SentDm.Voice.Agents.Tests" />
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="SentDm.Voice.Agents.Tests"/>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\"/>
   </ItemGroup>
 </Project>
