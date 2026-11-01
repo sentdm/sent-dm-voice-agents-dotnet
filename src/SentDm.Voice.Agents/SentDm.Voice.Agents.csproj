@@ -13,7 +13,7 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="SentDm.Voice.Agents.Tests"/>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\"/>
+    <InternalsVisibleTo Include="SentDm.Voice.Agents.Tests" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
