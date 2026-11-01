@@ -482,8 +482,8 @@ public static class Protocol
         ["session.resume"] = new HashSet<string> { "text", "audio" },
     };
 
-    /// <summary>Session frames that do not count towards <c>received</c>; every other frame with a session_id counts, also one of an unknown type.</summary>
-    public static readonly IReadOnlySet<string> Uncounted = new HashSet<string> { "session.start", "session.resumed", "session.resume", "audio" };
+    /// <summary>Frames that do not count towards <c>received</c>, whatever they carry; every other frame with a session_id counts, also one of an unknown type.</summary>
+    public static readonly IReadOnlySet<string> Uncounted = new HashSet<string> { "error", "session.start", "session.resumed", "session.resume", "audio" };
 
     /// <summary>The values Sent lists today; it may add more, so a runtime treats others as it would the fallback.</summary>
     public static readonly IReadOnlyList<string> PartyKinds = new[] { "user", "number", "conference", "agent", "anonymous" };
