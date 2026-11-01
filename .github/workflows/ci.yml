@@ -1,0 +1,45 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet tool restore
+      - run: dotnet csharpier check .
+      - run: dotnet build --configuration Release
+      - run: dotnet test --configuration Release --no-build
+      - name: The package packs
+        run: dotnet pack src/SentDm.Voice.Agents --configuration Release --no-build --output artifacts
+
+  conformance:
+    name: conformance
+    # The protocol's scenarios against this SDK's conformance agent, at the protocol tag the package implements.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: dotnet build src/SentDm.Voice.Agents.Conformance --configuration Release
+      - uses: sentdm/sent-dm-voice-protocol@v0.2.0
+        with:
+          agent: dotnet src/SentDm.Voice.Agents.Conformance/bin/Release/net8.0/SentDm.Voice.Agents.Conformance.dll

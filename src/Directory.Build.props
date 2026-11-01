@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <Authors>Sent</Authors>
+    <Company>Sent</Company>
+    <Copyright>Copyright 2026 Sent</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://docs.sent.dm</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sentdm/sent-dm-voice-agents-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <!-- The PDB travels inside the assembly: one artifact, no symbols package. -->
+    <DebugType>embedded</DebugType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+</Project>

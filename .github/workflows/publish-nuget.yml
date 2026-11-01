@@ -1,0 +1,38 @@
+# Runs when release-please publishes a release, and by hand to publish again if a run failed.
+#
+# nuget.org is pushed with an API key in the NUGET_API_KEY repository secret, scoped to push SentDm.* packages,
+# the way sent-dm-csharp publishes Sentdm. A version nuget.org already has is skipped, so a re-run is safe.
+name: Publish NuGet
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+concurrency:
+  group: publish-nuget
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build and pack
+        run: dotnet pack src/SentDm.Voice.Agents --configuration Release --output artifacts
+      - name: Publish to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "NUGET_API_KEY is not set on the repository" >&2
+            exit 1
+          fi
+          dotnet nuget push artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
