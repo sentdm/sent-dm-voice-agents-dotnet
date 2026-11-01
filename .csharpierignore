@@ -1,0 +1,4 @@
+# Generated from the protocol by sent-dm-sdk-pipeline; its shape is the emitter's, not the formatter's.
+src/SentDm.Voice.Agents/Frames.cs
+*.csproj
+*.props
