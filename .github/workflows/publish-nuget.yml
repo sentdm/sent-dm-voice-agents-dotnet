@@ -1,10 +1,18 @@
-# Runs when release-please publishes a release, and by hand to publish again if a run failed.
+# Runs when release-please publishes a release, and by hand to publish again if a run failed. By hand with
+# `dry_run`, it only exchanges the token for a key, which checks the nuget.org policy without publishing.
 #
-# nuget.org is pushed with an API key in the NUGET_API_KEY repository secret, scoped to push SentDm.* packages,
-# the way sent-dm-csharp publishes Sentdm. A version nuget.org already has is skipped, so a re-run is safe.
+# nuget.org is pushed by trusted publishing: the job's OIDC token is exchanged for a one-hour API key by
+# NuGet/login, against a Trusted Publishing policy on nuget.org created by the `sent` profile with the `sentdm`
+# organisation as the package owner (repository owner sentdm, repository sent-dm-voice-agents-dotnet, workflow
+# file publish-nuget.yml, environment blank, glob SentDm.*). No long-lived key exists anywhere. A version nuget.org already has is skipped, so a re-run is safe.
 name: Publish NuGet
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Exchange the OIDC token for a key and stop, to check the nuget.org policy without publishing
+        type: boolean
+        default: false
   release:
     types: [published]
 
@@ -18,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,14 +34,27 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Build and pack
-        run: dotnet pack src/SentDm.Voice.Agents --configuration Release --output artifacts
-      - name: Publish to nuget.org
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      - name: The version to publish
+        # 0.0.0 is the template's placeholder: the repository has no release yet, so there is nothing to publish.
         run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "NUGET_API_KEY is not set on the repository" >&2
+          version="$(sed -n 's/.*<VersionPrefix>\(.*\)<\/VersionPrefix>.*/\1/p' src/SentDm.Voice.Agents/SentDm.Voice.Agents.csproj)"
+          echo "version=$version"
+          if [ "$version" = "0.0.0" ] && [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "no release yet: the csproj still carries 0.0.0" >&2
             exit 1
           fi
-          dotnet nuget push artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+      - name: Build and pack
+        run: dotnet pack src/SentDm.Voice.Agents --configuration Release --output artifacts
+      - name: Exchange the job's OIDC token for a temporary nuget.org API key
+        id: login
+        uses: NuGet/login@v1
+        with:
+          # The nuget.org profile that created the policy (not the organisation that owns the packages, and not
+          # an email address); NUGET_USER overrides it for a policy created by someone else.
+          user: ${{ vars.NUGET_USER || 'sent' }}
+      - name: Publish to nuget.org
+        if: ${{ !inputs.dry_run }}
+        run: dotnet nuget push artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --skip-duplicate
+      - name: The policy answered
+        if: ${{ inputs.dry_run }}
+        run: echo "nuget.org exchanged the token for a key; the policy matches this repository and workflow"

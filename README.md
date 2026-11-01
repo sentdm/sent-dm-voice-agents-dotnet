@@ -86,4 +86,4 @@ dotnet csharpier check .               # formatting; Frames.cs is excluded
 
 The conformance scenarios run in CI through the protocol's action, against the
 `SentDm.Voice.Agents.Conformance` program. Releases are cut by release-please from `main` and published to
-nuget.org from GitHub Actions.
+nuget.org from GitHub Actions by trusted publishing, with no stored key.
