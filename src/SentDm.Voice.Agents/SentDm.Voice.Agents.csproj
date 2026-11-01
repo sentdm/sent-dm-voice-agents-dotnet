@@ -4,7 +4,7 @@
     <RootNamespace>SentDm.Voice.Agents</RootNamespace>
     <PackageId>SentDm.Voice.Agents</PackageId>
     <!-- release-please moves this line; the lane stamps the repository's current version at render time. -->
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>0.1.1</VersionPrefix>
     <Description>Sent Voice Agents for .NET: an AI agent that takes and places phone calls through Sent.</Description>
     <PackageTags>sent;voice;agents;calls;websocket</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>

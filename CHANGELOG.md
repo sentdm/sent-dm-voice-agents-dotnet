@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/sentdm/sent-dm-voice-agents-dotnet/compare/v0.1.0...v0.1.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **sdk:** the .NET runtime holds frames during a resume, fails lost tool calls, reports a drained connection's leftovers ([890e609](https://github.com/sentdm/sent-dm-voice-agents-dotnet/commit/890e609fe602bc89fd385cdef48159bcdead06a0))
+
 ## 0.1.0 (2026-11-01)
 
 
