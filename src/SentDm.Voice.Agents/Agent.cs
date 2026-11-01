@@ -73,6 +73,10 @@ internal sealed class Connection : ISender
     public readonly Dictionary<string, Session> Sessions = new();
     public List<Session> Pending;
     public Timer? Watchdog;
+
+    /// <summary>What the watchdog waits for, and how long: connection.ready on a new socket, then any frame.</summary>
+    public string Expected = "connection.ready";
+    public long DueMs;
     public long HeartbeatMs;
     public readonly CancellationTokenSource Cancel = new();
     public readonly Channel<(byte[] Data, WebSocketMessageType Kind)> Outbox =
@@ -116,7 +120,7 @@ public class Agent
     /// <summary>The longest wait before another attempt to connect.</summary>
     private const int MaxBackoffMs = 30_000;
 
-    /// <summary>How long a handshake may take before the attempt counts as failed.</summary>
+    /// <summary>How long a handshake may take before the attempt counts as failed, and how long an open socket may wait for connection.ready.</summary>
     private const int HandshakeTimeoutMs = 10_000;
 
     /// <summary>How many heartbeat intervals without a frame make a connection dead, as Heartbeats in docs/protocol.md says.</summary>
@@ -137,9 +141,9 @@ public class Agent
     protected IAgentLogger Log { get; }
 
     private readonly object _gate = new();
-    private readonly HashSet<Connection> _connections = new();
-    private readonly Dictionary<string, Session> _live = new();
-    private int _attempt;
+    internal readonly HashSet<Connection> _connections = new();
+    internal readonly Dictionary<string, Session> _live = new();
+    internal int _attempt;
     private bool _stopped;
     private TaskCompletionSource? _done;
 
@@ -360,12 +364,28 @@ public class Agent
             return;
         }
         Log.Info($"connected to {url.Host}");
+        // Until connection.ready arrives the socket has the handshake's deadline; Ready() hands it to Heard().
+        Arm(connection, HandshakeTimeoutMs, "connection.ready");
         var writer = Write(connection, socket);
-        await Read(connection, socket).ConfigureAwait(false);
-        connection.Outbox.Writer.TryComplete();
-        await writer.ConfigureAwait(false);
-        socket.Dispose();
-        Closed(connection);
+        try
+        {
+            await Read(connection, socket).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Whatever ended the read, the socket is released and the connection reported closed.
+            connection.Outbox.Writer.TryComplete();
+            try
+            {
+                await writer.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // The writer's own failures are the socket's; nothing to add.
+            }
+            socket.Dispose();
+            Closed(connection);
+        }
     }
 
     private async Task Write(Connection connection, ClientWebSocket socket)
@@ -446,7 +466,15 @@ public class Agent
                     Log.Warn($"ignored a frame: {error.Message}");
                     continue;
                 }
-                Handle(connection, frame);
+                try
+                {
+                    Handle(connection, frame);
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    // A frame the runtime could not handle is skipped; the connection goes on.
+                    Log.Error($"handling a {frame.Type} frame failed: {error}");
+                }
             }
         }
         catch (Exception error)
@@ -470,21 +498,28 @@ public class Agent
     {
         if (!connection.Ready)
             return;
-        var silence = SilentIntervals * connection.HeartbeatMs;
+        Arm(connection, SilentIntervals * connection.HeartbeatMs, "frame");
+    }
+
+    /// <summary>Arms the connection's one watchdog: nothing within <paramref name="dueMs"/> closes the socket.</summary>
+    private void Arm(Connection connection, long dueMs, string expected)
+    {
+        connection.Expected = expected;
+        connection.DueMs = dueMs;
         connection.Watchdog ??= new Timer(
             _ =>
             {
-                Log.Warn($"no frame for {silence} ms, closing");
+                Log.Warn($"no {connection.Expected} for {connection.DueMs} ms, closing");
                 connection.Socket?.Abort();
             },
             null,
             Timeout.Infinite,
             Timeout.Infinite
         );
-        connection.Watchdog.Change(silence, Timeout.Infinite);
+        connection.Watchdog.Change(dueMs, Timeout.Infinite);
     }
 
-    private void Handle(Connection connection, Frame frame)
+    internal void Handle(Connection connection, Frame frame)
     {
         switch (frame)
         {
@@ -496,6 +531,11 @@ public class Agent
                     Pong.TypeName,
                     Protocol.EncodeToString(new Pong { Ts = ping.Ts })
                 );
+                // A connection that lived through a heartbeat interval is a good one: the next loss starts the
+                // backoff over. A connection that dies before its first ping keeps it growing.
+                if (connection.Ready)
+                    lock (_gate)
+                        _attempt = 0;
                 return;
             case ConnectionDraining:
                 Drain(connection);
@@ -522,14 +562,13 @@ public class Agent
         }
     }
 
-    private void Ready(Connection connection, ConnectionReady frame)
+    internal void Ready(Connection connection, ConnectionReady frame)
     {
         List<Session> pending;
         lock (_gate)
         {
             connection.Ready = true;
             connection.HeartbeatMs = frame.HeartbeatIntervalMs;
-            _attempt = 0;
             pending = connection
                 .Pending.Where(session =>
                     _live.TryGetValue(session.Id, out var live) && live == session
@@ -574,7 +613,7 @@ public class Agent
         OpenConnection(moving, 0);
     }
 
-    private void StartSession(Connection connection, SessionStart frame)
+    internal void StartSession(Connection connection, SessionStart frame)
     {
         var session = new Session(frame, connection);
         lock (_gate)
@@ -643,14 +682,21 @@ public class Agent
                 return;
         }
         var again = session.Resumed(frame);
-        Log.Info($"session {session.Id} resumed, sending {again.Count} frame(s) again");
-        foreach (var frameAgain in again)
-            connection.SendText(frameAgain.Type, Protocol.EncodeToString(frameAgain));
+        Log.Info($"session {session.Id} resumed, sent {again} frame(s) again");
     }
 
-    private void Failed(Connection connection, ErrorFrame frame)
+    /// <summary>
+    /// An error is uncounted, as Counting frames in docs/protocol.md says. Only one that refuses a session.resume
+    /// changes the session's fate; any other is the handler's to read.
+    /// </summary>
+    internal void Failed(Connection connection, ErrorFrame frame)
     {
         Log.Warn($"error {frame.Error.Code}: {frame.Error.Message}");
+        if (
+            frame.FrameType != "session.resume"
+            && frame.Error.Code is not ("resume_failed" or "connection_full")
+        )
+            return;
         Session? session;
         lock (_gate)
         {
@@ -682,16 +728,18 @@ public class Agent
         }
     }
 
-    private void Lost(Session session)
+    internal void Lost(Session session)
     {
         Forget(session);
+        session.Abandon();
         Enqueue(session, () => OnSessionLostAsync(session));
     }
 
-    private void Closed(Connection connection)
+    internal void Closed(Connection connection)
     {
         List<Session> pending;
         int delay;
+        bool drained;
         var lostSessions = new List<Session>();
         lock (_gate)
         {
@@ -722,12 +770,14 @@ public class Agent
                 )
                 .Concat(movable)
                 .ToList();
-            if (connection.Draining && pending.Count == 0)
-                return;
-            delay = Backoff();
+            drained = connection.Draining && pending.Count == 0;
+            delay = drained ? 0 : Backoff();
         }
+        // Reported whether or not a reconnect follows: a drained connection's leftovers are lost too.
         foreach (var session in lostSessions)
             Lost(session);
+        if (drained)
+            return;
         Log.Info($"reconnecting in {delay} ms to resume {pending.Count} session(s)");
         OpenConnection(pending, delay);
     }

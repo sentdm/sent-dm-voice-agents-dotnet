@@ -80,15 +80,20 @@ public class SessionTests
     [Fact]
     public void AResumeSendsAgainWhatSentDidNotRead()
     {
-        var session = new Session(Start(), new Recorder());
+        var recorder = new Recorder();
+        var session = new Session(Start(), recorder);
         session.Say("one");
         session.Say("two");
         session.Say("three");
         var resume = session.ResumeFrame();
         Assert.StartsWith("vsr_", resume.Token);
         Assert.Equal(0, resume.Received);
-        var again = session.Resumed(Resumed(1, 'b'));
-        Assert.Equal(new[] { "two", "three" }, again.Select(frame => ((AgentSay)frame).Text));
+        session.Resuming = true;
+        Assert.Equal(2, session.Resumed(Resumed(1, 'b')));
+        Assert.Equal(
+            new[] { "one", "two", "three", "two", "three" },
+            recorder.Frames.Select(frame => ((AgentSay)frame).Text)
+        );
         Assert.StartsWith("vsr_b", session.Token);
         Assert.Equal(3, session.Sent);
     }
@@ -96,11 +101,13 @@ public class SessionTests
     [Fact]
     public void AResumePastTheRetainedFramesHangsUp()
     {
-        var session = new Session(Start(), new Recorder());
+        var recorder = new Recorder();
+        var session = new Session(Start(), recorder);
         for (var i = 0; i < Protocol.RetainedFrames + 3; i++)
             session.Say(i.ToString());
-        var again = session.Resumed(Resumed(1, 'c'));
-        var call = Assert.IsType<ToolCall>(Assert.Single(again));
+        session.Resuming = true;
+        Assert.Equal(1, session.Resumed(Resumed(1, 'c')));
+        var call = Assert.IsType<ToolCall>(recorder.Frames.Last());
         Assert.Equal("hangup", call.Name);
     }
 
@@ -145,6 +152,89 @@ public class SessionTests
                 )
         );
         await Assert.ThrowsAsync<SessionEndedException>(() => task);
+        Assert.Throws<SessionEndedException>(() => session.Say("too late"));
+    }
+
+    [Fact]
+    public async Task AFrameThatBreaksTheProtocolIsRefusedBeforeItCounts()
+    {
+        var recorder = new Recorder();
+        var session = new Session(Start(), recorder);
+        Assert.Throws<FrameException>(() => session.Say(""));
+        await Assert.ThrowsAsync<FrameException>(() => session.SendDtmfAsync("xyz"));
+        Assert.Equal(0, session.Sent);
+        Assert.Empty(recorder.Frames);
+    }
+
+    [Fact]
+    public async Task FramesSentDuringAResumeWaitForTheReplay()
+    {
+        var recorder = new Recorder();
+        var session = new Session(Start(), recorder);
+        session.Say("before");
+        session.Resuming = true;
+        session.Say("during");
+        var task = session.HangupAsync();
+        Assert.Equal(new[] { "before" }, recorder.Frames.Select(f => ((AgentSay)f).Text));
+        Assert.Equal(3, session.Sent);
+        var sent = session.Resumed(Resumed(1, 'd'));
+        Assert.Equal(2, sent);
+        Assert.False(session.Resuming);
+        Assert.Equal("during", ((AgentSay)recorder.Frames[1]).Text);
+        var call = Assert.IsType<ToolCall>(recorder.Frames[2]);
+        Assert.Equal("hangup", call.Name);
+        session.AnswerTool(
+            (ToolResult)
+                Protocol.Decode(
+                    new JsonObject
+                    {
+                        ["type"] = "tool.result",
+                        ["session_id"] = "vs_1",
+                        ["call_ref"] = call.CallRef,
+                        ["ok"] = true,
+                    }
+                )
+        );
+        Assert.True((await task).Ok);
+    }
+
+    [Fact]
+    public void AResumePastWhatWasSentSendsNothingAgain()
+    {
+        var recorder = new Recorder();
+        var session = new Session(Start(), recorder);
+        session.Say("one");
+        session.Resuming = true;
+        Assert.Equal(0, session.Resumed(Resumed(5, 'e')));
+        Assert.Equal(5, session.Sent);
+    }
+
+    [Fact]
+    public void AudioDuringAResumeIsDroppedAndAfterTheEndRefused()
+    {
+        var recorder = new Recorder();
+        var session = new Session(Start("audio", new JsonObject { ["stream"] = 7 }), recorder);
+        session.Resuming = true;
+        session.SendAudio(new byte[640]);
+        Assert.Empty(recorder.Audio);
+        session.Resuming = false;
+        session.Finish(
+            (SessionEnd)
+                Protocol.Decode(
+                    """{"type":"session.end","session_id":"vs_1","reason":"caller_hung_up","duration_ms":10}"""
+                )
+        );
+        Assert.Throws<SessionEndedException>(() => session.SendAudio(new byte[640]));
+    }
+
+    [Fact]
+    public async Task ALostSessionFailsItsToolCallsAndRefusesMore()
+    {
+        var session = new Session(Start(), new Recorder());
+        var task = session.HangupAsync();
+        session.Abandon();
+        await Assert.ThrowsAsync<SessionEndedException>(() => task);
+        Assert.True(session.Ended && session.Lost);
         Assert.Throws<SessionEndedException>(() => session.Say("too late"));
     }
 
