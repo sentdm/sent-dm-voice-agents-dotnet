@@ -40,6 +40,6 @@ jobs:
         with:
           node-version: '22'
       - run: dotnet build src/SentDm.Voice.Agents.Conformance --configuration Release
-      - uses: sentdm/sent-dm-voice-protocol@v0.2.0
+      - uses: sentdm/sent-dm-voice-protocol@v1.0.0
         with:
           agent: dotnet src/SentDm.Voice.Agents.Conformance/bin/Release/net8.0/SentDm.Voice.Agents.Conformance.dll
