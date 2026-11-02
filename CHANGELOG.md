@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/sentdm/sent-dm-voice-agents-dotnet/compare/v0.1.1...v0.2.0) (2026-11-02)
+
+
+### Features
+
+* **protocol:** protocol v1.0.0 ([3222da3](https://github.com/sentdm/sent-dm-voice-agents-dotnet/commit/3222da39477e47bd5e4b3f05ad7f92010ebc15c2))
+
 ## [0.1.1](https://github.com/sentdm/sent-dm-voice-agents-dotnet/compare/v0.1.0...v0.1.1) (2026-11-01)
 
 
